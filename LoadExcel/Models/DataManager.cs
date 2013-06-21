@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Collections;
 using System.IO;
+using System.Text.RegularExpressions;
 
 using Oracle.DataAccess.Client;
 using OfficeOpenXml;
@@ -22,6 +23,10 @@ namespace LoadExcel.Models
         /// </summary>
         private PetaPoco.Database db = null;
 
+        /// <summary>
+        /// Excel開始位置 (ログ出力に使用)
+        /// </summary>
+        private int _start_row = 2;
 
         /// <summary>
         /// コンストラクタ
@@ -30,6 +35,7 @@ namespace LoadExcel.Models
         {
             string cs = string.Format(@"User Id={0};Password={1};Data Source={2};",
                 "TRA_USER", "1qaz2wsx", "HOGE");
+            //string cs = "Driver={Oracle in OraClient11g_home2};DBQ=HOGE;UID=TRA_USER;PWD=1qaz2wsx;";
 
             db = new PetaPoco.Database(cs, Oracle.DataAccess.Client.OracleClientFactory.Instance);
         }
@@ -43,12 +49,13 @@ namespace LoadExcel.Models
         /// <param name="sheetName"></param>
         /// <param name="start_row"></param>
         /// <returns>Excel読み込みデータ</returns>
-        public List<CpData> LoadExcel(string path, string sheetName, int start_row)
+        public List<XlsData> LoadExcel(string path, string sheetName, int start_row)
         {
             log.Debug(string.Format("target file= {0}; sheet= {1}", path, sheetName));
 
+            _start_row = start_row; //開始位置 (ログ出力に使用)
             int rowIndex = start_row;
-            List<CpData> records = new List<CpData>();
+            List<XlsData> records = new List<XlsData>();
 
             try
             {
@@ -61,32 +68,32 @@ namespace LoadExcel.Models
 
                         while (true)
                         {
-                            CpData cd = new CpData();
+                            XlsData data = new XlsData();
 
-                            cd.id = rowIndex;
+                            data.id = rowIndex - start_row;
                             // read row data
-                            cd.drcode = ToString(sheet.Cells[rowIndex, 1].Value);
-                            cd.drname = ToString(sheet.Cells[rowIndex, 2].Value);
-                            if (string.IsNullOrEmpty(cd.drname))
+                            data.drcode = ToString(sheet.Cells[rowIndex, 1].Value);
+                            data.drname = ToString(sheet.Cells[rowIndex, 2].Value);
+                            if (string.IsNullOrEmpty(data.drname))
                             {
                                 break; //Dr名が無ければ終了
                             }
-                            cd.ncc_cd = ToString(sheet.Cells[rowIndex, 3].Value);
-                            cd.ncc_name = ToString(sheet.Cells[rowIndex, 4].Value);
-                            cd.ncc_dept = ToString(sheet.Cells[rowIndex, 5].Value);
-                            cd.title = ToString(sheet.Cells[rowIndex, 6].Value);
-                            cd.category = ToString(sheet.Cells[rowIndex, 7].Value);
-                            cd.kingaku = ToLong(sheet.Cells[rowIndex, 8].Value);
-                            cd.kaisu = ToInt(sheet.Cells[rowIndex, 9].Value);
+                            data.ncc_cd = ToString(sheet.Cells[rowIndex, 3].Value);
+                            data.ncc_name = ToString(sheet.Cells[rowIndex, 4].Value);
+                            data.ncc_dept = ToString(sheet.Cells[rowIndex, 5].Value);
+                            data.title = ToString(sheet.Cells[rowIndex, 6].Value);
+                            data.category = ToString(sheet.Cells[rowIndex, 7].Value);
+                            data.kingaku = ToLong(sheet.Cells[rowIndex, 8].Value);
+                            data.kaisu = ToInt(sheet.Cells[rowIndex, 9].Value);
 
                             // 頭 '0' 埋め
-                            cd.drcode = cd.drcode.PadLeft(6, '0');
-                            if (cd.drcode == "000000")
+                            data.drcode = data.drcode.PadLeft(6, '0');
+                            if (data.drcode == "000000")
                             {
-                                cd.drcode = string.Empty;
+                                data.drcode = string.Empty;
                             }
 
-                            records.Add(cd);
+                            records.Add(data);
                             rowIndex++;
                         }
 
@@ -107,11 +114,11 @@ namespace LoadExcel.Models
         }
 
         /// <summary>
-        /// cp_dataにデータを登録する
+        /// xls_dataにデータを登録する
         /// </summary>
         /// <param name="items"></param>
         /// <returns></returns>
-        public int BulkInsert(List<CpData> items)
+        public int BulkInsert(List<XlsData> items)
         {
             int registed = 0;
 
@@ -132,204 +139,332 @@ namespace LoadExcel.Models
         }
 
         /// <summary>
-        /// CP_DATAテーブルを初期化
+        /// XLS_DATAテーブルを初期化
         /// </summary>
         private void truncate()
         {
-            string query = @"truncate table cp_data";
+            //一時テーブルを初期化
+            string query = @"truncate table xls_data";
             db.Execute(query);
         }
 
         #endregion
 
-        #region MegaCOARA 医師マスタ・施設マスタ取得
+        #region MegaCOARA 施設マスタ取得
 
         /// <summary>
-        /// 医師マスタから医師の情報を取得する
+        /// 施設名を元に施設マスタから施設情報を取得し、更新する
         /// </summary>
-        /// <param name="cp_data"></param>
-        public CpData UpdateDoctorInfo(CpData cp_data)
-        {
-            if (!string.IsNullOrEmpty(cp_data.drcode))
-            {
-                //医師コードを元に医師マスタを検索
-                var ds = GetDoctorByCode(cp_data.drcode);
-
-                if (ds.Count == 0)
-                {
-                    //氏名を元に医師マスタを検索
-                    ds = GetDoctorByName(cp_data.drname);
-                }
-
-                if (ds.Count != 1)
-                {
-                    log.Warn(string.Format("医師を特定することができませんでした。: Excel行={0}, 医師コード={1}, 氏名={2}",
-                        cp_data.id, cp_data.drcode, cp_data.drname));
-
-                    if (ds.Count == 0)
-                    {
-                        log.Warn("    候補データ: なし");
-                    }
-                    else
-                    {
-                        foreach (var d in ds)
-                        {
-                            log.Warn(string.Format("    候補データ: DOCCD={0}, NAME={1}", d.doccd, d.name));
-                        }
-                    }
-                    return cp_data;
-                }
-
-                //更新
-                cp_data.dm_cont_id = ds[0].cont_id;
-                cp_data.dm_doccd = ds[0].doccd;
-                cp_data.dm_ktkn_nm = ds[0].ktkn_nm;
-                cp_data.dm_name = ds[0].name;
-
-                log.Debug(string.Format("医師データ取得: CONT_ID={0}, DOCCD={1}, NAME={2}", cp_data.dm_cont_id, cp_data.dm_doccd, cp_data.dm_name));
-            }
-
-            return cp_data;
-        }
-
-        /// <summary>
-        /// doccdを元に医師マスタよりデータを取得
-        /// </summary>
-        /// <param name="doccd">医師コード</param>
-        /// <returns>医師マスタのデータ</returns>
-        public List<doctor> GetDoctorByCode(string doccd)
-        {
-            var sql = PetaPoco.Sql.Builder.Append("select cont_id, doccd, name, ktkn_nm")
-                .Append("from coa_doc1p")
-                .Append("where (drdymd = 0 or drdymd is null) and")
-                .Append("doccd=@doccd", new { doccd = doccd });
-
-            //医師マスタよりデータ取得
-            var ds = db.Fetch<doctor>(sql);
-
-            log.Debug(string.Format("doccd={0}, Count={1}", doccd, ds.Count));
-            return ds;
-        }
-
-        /// <summary>
-        /// 氏名を元に医師マスタよりデータを取得
-        /// </summary>
-        /// <param name="name">氏名</param>
-        /// <returns>医師マスタのデータ</returns>
-        public List<doctor> GetDoctorByName(string name)
-        {
-            //nameから半角スペース、全角スペースを除去
-            string docname = name.Replace("　", "").Replace(" ", "");
-
-            var sql = PetaPoco.Sql.Builder.Append("select cont_id, doccd, name, ktkn_nm")
-                .Append("from coa_doc1p")
-                .Append("where (drdymd = 0 or drdymd is null) and")
-                .Append("replace(replace(name, '　', ''), ' ', '') = @docname", new { docname = docname });
-
-            //医師マスタよりデータ取得
-            var ds = db.Fetch<doctor>(sql);
-
-            log.Debug(string.Format("docname={0}, Count={1}", docname, ds.Count));
-            return ds;
-        }
-
-
-        /// <summary>
-        /// 施設マスタから施設の情報を取得する
-        /// </summary>
-        /// <param name="cp_data"></param>
-        public CpData UpdateHspInfo(CpData cp_data)
-        {
-
-
-            if (!string.IsNullOrEmpty(cp_data.ncc_cd))
-            {
-                //施設コードを元に施設マスタを検索
-                var hs = GetHspByNccCode(cp_data.ncc_cd);
-                
-                if (hs.Count == 0)
-                {
-                    //施設名で検索
-                    hs = GetHspByName(cp_data.ncc_name);
-                }
-
-                if (hs.Count != 1)
-                {
-                    log.Warn(string.Format("施設を特定することができませんでした。: Excel行={0}, 施設コード={1}, 施設名={2}",
-                        cp_data.id, cp_data.ncc_cd, cp_data.ncc_name));
-
-                    if (hs.Count == 0)
-                    {
-                        log.Warn("    候補データ: なし");
-                    }
-                    else
-                    {
-                        foreach (var h in hs)
-                        {
-                            log.Warn(string.Format("    候補データ: 施設コード={0}{1}, 施設名={2}", h.hs01, h.hs02, h.acnt_nm));
-                        }
-                    }
-                    return cp_data;
-                }
-
-                //施設情報を更新
-                cp_data.hm_act_uni_id = hs[0].act_uni_id;
-                cp_data.hm_ncc_cd = hs[0].hs01 + hs[0].hs02;
-                cp_data.hm_name = hs[0].acnt_nm;
-                cp_data.hm_jpln_nm = hs[0].acnt_jpln_nm;
-                cp_data.hm_ktkn_nm = hs[0].acnt_ktkn_nm;
-
-                log.Debug(string.Format("施設データ取得: ACT_UNI_ID={0}, NCC_CD={1}, NAME={2}", cp_data.hm_act_uni_id, cp_data.hm_ncc_cd, cp_data.hm_name));
-            }
-
-            return cp_data;
-        }
-
-        /// <summary>
-        /// ncc_cdを元に施設マスタよりデータを取得
-        /// </summary>
-        /// <param name="ncc_cd">施設コード</param>
-        /// <returns>施設マスタのデータ</returns>
-        public List<hsp> GetHspByNccCode(string ncc_cd)
-        {
-            var sql = PetaPoco.Sql.Builder
-                .Append("select act_uni_id, hs01, hs02, acnt_nm, acnt_jpln_nm, acnt_ktkn_nm")
-                .Append("from coa_dcfhsp")
-                .Append("where (hpdymd = 0 or hpdymd is null) and")
-                .Append("hs01 || hs02 = @ncc_cd", new { ncc_cd = ncc_cd })
-                .Append("order by hs01, hs02");
-
-            //施設マスタよりデータ取得
-            var hs = db.Fetch<hsp>(sql);
-
-            log.Debug(string.Format("ncc_cd={0}, Count={1}", ncc_cd, hs.Count));
-            return hs;
-        }
-
-        /// <summary>
-        /// 施設名を元に施設マスタよりデータを取得
-        /// (施設名の部分一致で検索)
-        /// </summary>
-        /// <param name="name">施設名</param>
         /// <returns></returns>
-        public List<hsp> GetHspByName(string name)
+        private int UpdateHspByName()
         {
-            //部分一致でヒットするようにワイルドカードではさむ
-            string ncc_name = "%" + name + "%";
+            #region SQL
 
-            var sql = PetaPoco.Sql.Builder
-                .Append("select act_uni_id, hs01, hs02, acnt_nm, acnt_jpln_nm, acnt_ktkn_nm")
-                .Append("from coa_dcfhsp")
-                .Append("where (hpdymd = 0 or hpdymd is null) and")
-                .Append("acnt_nm like @ncc_name or", new { ncc_name = ncc_name })
-                .Append("m.acnt_jpln_nm like @ncc_name", new { ncc_name = ncc_name })
-                .Append("order by hs01, hs02");
+            //施設名の部分一致で施設情報を取得
+            string sql = @"
+select
+    t1.id,
+    t1.drcode,
+    t1.drname,
+    t1.ncc_cd,
+    t1.ncc_name,
+    t1.ncc_dept,
+    t1.title,
+    t1.category,
+    t1.kingaku,
+    t1.kaisu,
+    t1.dm_cont_id,
+    t1.dm_doccd,
+    t1.dm_name,
+    t1.dm_ktkn_nm,
+    h1.act_uni_id as hm_act_uni_id,
+    h1.ncc_cd as hm_ncc_cd,
+    h1.acnt_nm as hm_acnt_nm,
+    h1.acnt_jpln_nm as hm_acnt_jpln_nm,
+    h1.acnt_ktkn_nm as hm_acnt_ktkn_nm
+from
+    (select *
+        from tmp_data1
+        where hm_acnt_nm is null) t1
+    left join (
+        /* 施設マスタ */
+        select
+            act_uni_id,
+            hs01 || hs02 as ncc_cd,
+            acnt_nm,
+            acnt_jpln_nm,
+            acnt_ktkn_nm
+        from
+            coa_dcfhsp
+        where
+            hpdymd = 0 or hpdymd is null
+        ) h1
+        on h1.acnt_nm like '%' || t1.ncc_name || '%'
+order by
+    t1.id, h1.ncc_cd
+";
 
-            //施設マスタよりデータ取得
-            var hs = db.Fetch<hsp>(sql);
+            #endregion SQL
+            //更新件数
+            int ret = 0;
+            //更新用データ
+            var data = new Dictionary<int, List<TmpData>>();
 
-            log.Debug(string.Format("name={0}, Count={1}", name, hs.Count));
-            return hs;
+            //施設マスタからデータを取得
+            var items = db.Fetch<TmpData>(sql);
+
+            //取得データを走査し、更新用データを作成する
+            foreach (var item in items)
+            {
+                if (!data.ContainsKey(item.id))
+                {
+                    data.Add(item.id, new List<TmpData>());
+                }
+                data[item.id].Add(item);
+            }
+
+            //更新処理
+            using (var trans = db.GetTransaction())
+            {
+                foreach (var key in data.Keys) //key = TmsData.id
+                {
+                    if (data[key].Count == 1)
+                    {
+                        var item = data[key][0]; //TmpData
+                        if (!string.IsNullOrEmpty(item.hm_ncc_cd))
+                        {
+                            //ユニークなデータを発見
+                            ret += db.Update("tmp_data1", "id", item);
+                            log.DebugFormat("  -- update hsp data: row={0},ncc_cd={1}", item.id, item.hm_ncc_cd);
+                        }
+                        else
+                        {
+                            //該当データなし
+                            log.WarnFormat("施設マスタに該当のデータがありません。 Excel行={0},施設名={1}", item.id, item.ncc_name);
+                        }
+                    }
+                    else
+                    {
+                        //複数の候補がある
+                        log.WarnFormat("施設情報が特定できませんでした。 Excel行={0},施設名={1}", data[key][0].id, data[key][0].ncc_name);
+                        log.Warn("  候補データ:");
+
+                        foreach (var d in data[key])
+                        {
+                            log.WarnFormat("    施設コード={0},施設名={1}", d.hm_ncc_cd, d.hm_acnt_nm);
+                        }
+                    }
+                } //end foreach
+
+                trans.Complete();
+            } //end using
+
+            return ret;
+        }
+
+        #endregion
+
+        #region MegaCOARA 医師マスタ取得
+
+        /// <summary>
+        /// 医師情報更新
+        /// </summary>
+        /// <returns></returns>
+        private int UpdateDoctorByName()
+        {
+            #region SQL
+            //氏名を元に医師マスタを検索
+            var sql = @"
+select
+    t1.id,
+    t1.drcode,
+    t1.drname,
+    t1.ncc_cd,
+    t1.ncc_name,
+    t1.ncc_dept,
+    t1.title,
+    t1.category,
+    t1.kingaku,
+    t1.kaisu,
+    d1.cont_id as dm_cont_id,
+    d1.doccd as dm_doccd,
+    d1.name as dm_name,
+    d1.ktkn_nm as dm_ktkn_nm
+from
+    /* 医師情報未取得データ */
+    (select *
+        from tmp_data1
+        where dm_cont_id is null) t1
+    left join (
+        /* 医師マスタ */
+        select
+            cont_id, doccd, name, ktkn_nm
+        from
+            coa_doc1p
+        where
+            (drdymd = 0 or drdymd is null) and
+            doccd is not null
+        ) d1
+    on replace(replace(t1.drname, '　', ''), ' ', '') 
+        = replace(replace(d1.name, '　', ''), ' ', '')
+order by
+    t1.id, d1.cont_id
+";
+            #endregion SQL
+            //更新件数
+            int ret = 0;
+            //更新用データ
+            var data = new Dictionary<int, List<TmpData>>();
+
+
+            //医師マスタからデータを取得
+            var ds = db.Fetch<TmpData>(sql);
+
+            //取得データを走査し、更新用データを作成する
+            foreach (var item in ds)
+            {
+                if (!data.ContainsKey(item.id))
+                {
+                    data.Add(item.id, new List<TmpData>());
+                }
+                data[item.id].Add(item);
+            }
+
+            //更新処理
+            using (var trans = db.GetTransaction())
+            {
+                foreach (var key in data.Keys) //key = TmsData.id
+                {
+                    if (data[key].Count == 1)
+                    {
+                        var item = data[key][0]; //TmpData
+                        if (!string.IsNullOrEmpty(item.dm_doccd))
+                        {
+                            //ユニークなデータを発見
+                            ret += db.Update("tmp_data1", "id", item);
+                            log.DebugFormat("  -- update doctor data: row={0},doccd={1}", item.id, item.dm_doccd);
+                        }
+                        else
+                        {
+                            //該当データなし
+                            log.WarnFormat("医師マスタに該当のデータがありません。 Excel行={0},医師氏名={1}", item.id, item.drname);
+                        }
+                    }
+                    else
+                    {
+                        //複数の候補がある
+                        log.WarnFormat("医師情報が特定できませんでした。 Excel行={0},医師氏名={1}", data[key][0].id, data[key][0].drname);
+                        log.Warn("  候補データ:");
+
+                        foreach (var d in data[key])
+                        {
+                            log.WarnFormat("    医師コード={0},医師氏名={1}",d.dm_doccd, d.dm_name);
+                        }
+                    }
+                } //end foreach
+
+                trans.Complete();
+            } //end using
+
+            return ret;
+        }
+
+        #endregion
+
+        #region マスタデータ登録
+        /// <summary>
+        /// 医師コード、施設コードを元に各マスタから一時テーブルにデータを取得
+        /// </summary>
+        /// <returns></returns>
+        private int InsertTempTable()
+        {
+            #region SQL
+
+            #region - 一時テーブル初期化
+            var sql_temp_truncate = @"truncate table tmp_data1";
+            #endregion
+
+            #region - 一時テーブル登録
+            //一時テーブル登録
+            var sql = PetaPoco.Sql.Builder.Append(@"
+insert into tmp_data1
+select
+    c1.id,
+    c1.drcode,
+    c1.drname,
+    c1.ncc_cd,
+    c1.ncc_name,
+    c1.ncc_dept,
+    c1.title,
+    c1.category,
+    c1.kingaku,
+    c1.kaisu,
+    d.cont_id as dm_cont_id,
+    d.doccd as dm_doccd,
+    d.name as dm_name,
+    d.ktkn_nm as dm_ktkn_nm,
+    h.act_uni_id as hm_act_uni_id,
+    h.hs01 || h.hs02 as hm_ncc_cd,
+    h.acnt_nm as hm_acnt_nm,
+    h.acnt_jpln_nm as hm_acnt_jpln_nm,
+    h.acnt_ktkn_nm as hm_acnt_ktkn_nm
+from
+    xls_data c1
+    left join (
+        /* doctor */
+        select
+            c2.id, d1.cont_id, d1.doccd, d1.name, d1.ktkn_nm
+        from
+            xls_data c2
+            left join (
+                select
+                    cont_id, doccd, name, ktkn_nm
+                from
+                    coa_doc1p
+                where
+                    (drdymd = 0 or drdymd is null) and
+                    doccd is not null
+                ) d1
+            on c2.drcode = d1.doccd
+    ) d on c1.id = d.id
+    left join (
+        /* hsp */
+        select
+            c3.id, h1.act_uni_id, h1.hs01, h1.hs02,
+            h1.acnt_nm, h1.acnt_jpln_nm, h1.acnt_ktkn_nm
+        from
+            xls_data c3
+            left join (
+                select
+                    act_uni_id, hs01, hs02, acnt_nm,
+                    acnt_jpln_nm, acnt_ktkn_nm
+                from
+                    coa_dcfhsp
+                where
+                    (hpdymd = 0 or hpdymd is null) and
+                    hs01 is not null and
+                    hs02 is not null
+            ) h1
+            on c3.ncc_cd = h1.hs01 || h1.hs02
+    ) h on c1.id = h.id
+");
+            #endregion - 一時テーブル登録
+
+            #endregion SQL
+
+            //一時テーブル初期化
+            db.Execute(sql_temp_truncate);
+
+            //一時テーブル登録
+            int ret = 0;
+            using (var trans = db.GetTransaction())
+            {
+                ret = db.Execute(sql);
+                trans.Complete();
+            }
+
+            log.DebugFormat("  tmp_data1 登録件数={0}", ret);
+            return ret;
         }
 
         #endregion
@@ -339,26 +474,25 @@ namespace LoadExcel.Models
         /// <summary>
         /// 一括更新
         /// </summary>
-        /// <param name="items"></param>
-        public void UpdateMasterInfo(List<CpData> items)
+        public void UpdateMasterInfo()
         {
-            using (var trans = db.GetTransaction())
-            {
-                foreach (var item in items)
-                {
-                    //施設情報取得
-                    var c = UpdateHspInfo(item);
-                    //医師情報取得
-                    c = UpdateDoctorInfo(c);
-                    //Database更新処理
-                    db.Update("cp_data", "id", c);
-                    log.Debug(string.Format("MegaCOARAマスタ情報反映: 行No={0}", c.id));
-                }
-                trans.Complete();
-            }
+            
+            //コードを元に一時テーブル登録
+            int rows = InsertTempTable();
+            log.DebugFormat("  -- update data by code: {0}", rows);
+
+            //医師情報更新
+            rows = UpdateDoctorByName();
+            log.DebugFormat("  -- update data by doctor name: {0}", rows);
+
+            //施設情報更新
+            rows = UpdateHspByName();
+            log.DebugFormat("  -- update data by hsp name: {0}", rows);
+
         }
 
         #endregion
+
 
         #region 共通メソッド
         /// <summary>

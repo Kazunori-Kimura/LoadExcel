@@ -23,10 +23,10 @@ namespace LoadExcel
             DataManager dm = new DataManager();
 
             //Excelを読み込みDBに登録
-            List<CpData> items = dm.LoadExcel(path, sheetName, rowIndex);
+            dm.LoadExcel(path, sheetName, rowIndex);
 
             //MegaCOARAの各マスタの情報を反映
-            dm.UpdateMasterInfo(items);
+            dm.UpdateMasterInfo();
         }
 
     }

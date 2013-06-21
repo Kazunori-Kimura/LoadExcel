@@ -40,10 +40,7 @@
     <Reference Include="log4net">
       <HintPath>..\packages\log4net.2.0.0\lib\net35-full\log4net.dll</HintPath>
     </Reference>
-    <Reference Include="Oracle.DataAccess, Version=4.112.1.2, Culture=neutral, PublicKeyToken=89b483f429c47342, processorArchitecture=x86">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>D:\work\lib\Oracle.DataAccess.dll</HintPath>
-    </Reference>
+    <Reference Include="Oracle.DataAccess, Version=4.112.3.0, Culture=neutral, PublicKeyToken=89b483f429c47342, processorArchitecture=x86" />
     <Reference Include="System" />
     <Reference Include="System.Configuration" />
     <Reference Include="System.Core" />
@@ -57,7 +54,10 @@
     <Compile Include="Models\DataManager.cs" />
     <Compile Include="Models\doctor.cs" />
     <Compile Include="Models\hsp.cs" />
+    <Compile Include="Models\MstData.cs" />
     <Compile Include="Models\PetaPoco.cs" />
+    <Compile Include="Models\TmpData.cs" />
+    <Compile Include="Models\XlsData.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
