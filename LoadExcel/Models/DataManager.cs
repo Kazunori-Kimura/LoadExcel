@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Collections;
 using System.IO;
-using System.Text.RegularExpressions;
+using System.Configuration;
 
 using Oracle.DataAccess.Client;
 using OfficeOpenXml;
@@ -13,6 +13,8 @@ namespace LoadExcel.Models
 {
     class DataManager
     {
+        #region properties
+
         /// <summary>
         /// logger
         /// </summary>
@@ -28,17 +30,24 @@ namespace LoadExcel.Models
         /// </summary>
         private int _start_row = 2;
 
+        #endregion
+
+        #region コンストラクタ
+
         /// <summary>
         /// コンストラクタ
         /// </summary>
         public DataManager()
         {
+            //TODO DB接続文字列をapp.configから取得する
             string cs = string.Format(@"User Id={0};Password={1};Data Source={2};",
                 "TRA_USER", "1qaz2wsx", "HOGE");
             //string cs = "Driver={Oracle in OraClient11g_home2};DBQ=HOGE;UID=TRA_USER;PWD=1qaz2wsx;";
 
             db = new PetaPoco.Database(cs, Oracle.DataAccess.Client.OracleClientFactory.Instance);
         }
+
+        #endregion
 
         #region Excel読み込み
 
@@ -72,19 +81,19 @@ namespace LoadExcel.Models
 
                             data.id = rowIndex - start_row;
                             // read row data
-                            data.drcode = ToString(sheet.Cells[rowIndex, 1].Value);
-                            data.drname = ToString(sheet.Cells[rowIndex, 2].Value);
+                            data.drcode = Utils.ParseString(sheet.Cells[rowIndex, 1].Value);
+                            data.drname = Utils.ParseString(sheet.Cells[rowIndex, 2].Value);
                             if (string.IsNullOrEmpty(data.drname))
                             {
                                 break; //Dr名が無ければ終了
                             }
-                            data.ncc_cd = ToString(sheet.Cells[rowIndex, 3].Value);
-                            data.ncc_name = ToString(sheet.Cells[rowIndex, 4].Value);
-                            data.ncc_dept = ToString(sheet.Cells[rowIndex, 5].Value);
-                            data.title = ToString(sheet.Cells[rowIndex, 6].Value);
-                            data.category = ToString(sheet.Cells[rowIndex, 7].Value);
-                            data.kingaku = ToLong(sheet.Cells[rowIndex, 8].Value);
-                            data.kaisu = ToInt(sheet.Cells[rowIndex, 9].Value);
+                            data.ncc_cd = Utils.ParseString(sheet.Cells[rowIndex, 3].Value);
+                            data.ncc_name = Utils.ParseString(sheet.Cells[rowIndex, 4].Value);
+                            data.ncc_dept = Utils.ParseString(sheet.Cells[rowIndex, 5].Value);
+                            data.title = Utils.ParseString(sheet.Cells[rowIndex, 6].Value);
+                            data.category = Utils.ParseString(sheet.Cells[rowIndex, 7].Value);
+                            data.kingaku = Utils.ParseLong(sheet.Cells[rowIndex, 8].Value);
+                            data.kaisu = Utils.ParseInt(sheet.Cells[rowIndex, 9].Value);
 
                             // 頭 '0' 埋め
                             data.drcode = data.drcode.PadLeft(6, '0');
@@ -150,13 +159,15 @@ namespace LoadExcel.Models
 
         #endregion
 
+        #region MegaCOARA マスタ反映
+
         #region MegaCOARA 施設マスタ取得
 
         /// <summary>
         /// 施設名を元に施設マスタから施設情報を取得し、更新する
         /// </summary>
-        /// <returns></returns>
-        private int UpdateHspByName()
+        /// <returns>正常終了時: true</returns>
+        private bool UpdateHspByName()
         {
             #region SQL
 
@@ -207,6 +218,8 @@ order by
             #endregion SQL
             //更新件数
             int ret = 0;
+            //警告有無
+            bool isWarn = false;
             //更新用データ
             var data = new Dictionary<int, List<TmpData>>();
 
@@ -241,6 +254,7 @@ order by
                         {
                             //該当データなし
                             log.WarnFormat("施設マスタに該当のデータがありません。 Excel行={0},施設名={1}", item.id, item.ncc_name);
+                            isWarn = true;
                         }
                     }
                     else
@@ -253,13 +267,15 @@ order by
                         {
                             log.WarnFormat("    施設コード={0},施設名={1}", d.hm_ncc_cd, d.hm_acnt_nm);
                         }
+                        isWarn = true;
                     }
                 } //end foreach
 
                 trans.Complete();
             } //end using
 
-            return ret;
+            log.DebugFormat("  -- UpdateHspByName: 更新件数={0}", ret);
+            return !isWarn;
         }
 
         #endregion
@@ -269,8 +285,8 @@ order by
         /// <summary>
         /// 医師情報更新
         /// </summary>
-        /// <returns></returns>
-        private int UpdateDoctorByName()
+        /// <returns>警告ありの場合、true</returns>
+        private bool UpdateDoctorByName()
         {
             #region SQL
             //氏名を元に医師マスタを検索
@@ -313,6 +329,8 @@ order by
             #endregion SQL
             //更新件数
             int ret = 0;
+            //警告あり
+            bool isWarn = false;
             //更新用データ
             var data = new Dictionary<int, List<TmpData>>();
 
@@ -348,6 +366,7 @@ order by
                         {
                             //該当データなし
                             log.WarnFormat("医師マスタに該当のデータがありません。 Excel行={0},医師氏名={1}", item.id, item.drname);
+                            isWarn = true;
                         }
                     }
                     else
@@ -360,13 +379,15 @@ order by
                         {
                             log.WarnFormat("    医師コード={0},医師氏名={1}",d.dm_doccd, d.dm_name);
                         }
+                        isWarn = true;
                     }
                 } //end foreach
 
                 trans.Complete();
             } //end using
 
-            return ret;
+            log.DebugFormat("  -- UpdateDoctorByName: 更新件数={0}", ret);
+            return isWarn;
         }
 
         #endregion
@@ -474,7 +495,8 @@ from
         /// <summary>
         /// 一括更新
         /// </summary>
-        public void UpdateMasterInfo()
+        /// <returns>警告有無</returns>
+        public bool UpdateMasterInfo()
         {
             
             //コードを元に一時テーブル登録
@@ -482,87 +504,541 @@ from
             log.DebugFormat("  -- update data by code: {0}", rows);
 
             //医師情報更新
-            rows = UpdateDoctorByName();
-            log.DebugFormat("  -- update data by doctor name: {0}", rows);
-
+            //  医師情報の取得警告はとりあえず無視する
+            UpdateDoctorByName();
+            
             //施設情報更新
-            rows = UpdateHspByName();
-            log.DebugFormat("  -- update data by hsp name: {0}", rows);
-
+            //  施設情報の取得結果(警告有無)を返す
+            return UpdateHspByName();
         }
 
         #endregion
 
+        #endregion MegaCOARA マスタ反映
 
-        #region 共通メソッド
+        #region 支払い回数 / 医師:施設 集計
+
         /// <summary>
-        /// セルの値をstring型に変換する
+        /// 支払い回数 / 医師:施設 集計
         /// </summary>
-        /// <param name="value">Worksheet.Cells.Value</param>
-        /// <returns>string</returns>
-        public string ToString(Object value)
+        public void Summarize()
         {
-            if (value == null)
+            #region SQL
+            //テーブル初期化
+            string sql_trunc = @"truncate table c_result";
+
+            //支払い回数 / 医師:施設 を集計する
+            string sql_summarize = @"
+insert into c_result
+select distinct
+    t1.dr_code,
+    t1.dr_name,
+    t1.hm_ncc_cd,
+    t1.hm_acnt_nm,
+    (select
+        max(ncc_dept)
+    from
+        tmp_data1 t2
+    where
+        t2.dm_doccd = t1.dr_code and
+        t2.hm_ncc_cd = t1.hm_ncc_cd
+    ) as ncc_dept,
+    t1.category,
+    count(t1.id) over (partition by t1.category, t1.dr_name) as siharai,
+    sum(t1.kingaku) over (partition by t1.category, t1.dr_name) as goukei,
+    t2.ncc_count
+from
+(
+    select
+        id,
+        category,
+        kingaku,
+        dm_doccd as dr_code,
+        case when dm_name is not null
+            then dm_name
+            else drname
+        end as dr_name,
+        hm_ncc_cd,
+        hm_acnt_nm
+    from
+        TMP_DATA1
+    where
+        hm_ncc_cd is not null
+) t1
+left join (
+    select distinct
+        t3.category,
+        t3.dr_name,
+        count(t3.hm_ncc_cd) over (partition by t3.category, t3.dr_name) as ncc_count
+    from
+        (
+            select distinct
+                category,
+                case when dm_name is not null
+                    then dm_name
+                    else drname
+                end as dr_name,
+                hm_ncc_cd
+            from tmp_data1
+            where hm_ncc_cd is not null
+        ) t3
+    ) t2
+on t1.category = t2.category and t1.dr_name = t2.dr_name
+order by
+    t1.category,
+    t1.dr_code
+";
+            #endregion
+
+            //c_result初期化
+            db.Execute(sql_trunc);
+
+            using (var trans = db.GetTransaction())
+            {
+                int ret = db.Execute(sql_summarize);
+                trans.Complete();
+
+                log.DebugFormat("  -- summarize: insert rows={0}", ret);
+            }
+        }
+
+        #endregion
+
+        #region DWH 施設-役割 紐付け取得
+
+        /// <summary>
+        /// YEARMON を取得する
+        /// </summary>
+        /// <returns>yyyyMM</returns>
+        private string GetYearMon()
+        {
+            string yearmon = DateTime.Now.ToString("yyyyMM");
+
+            while (!ExistsYearMon(yearmon))
+            {
+                yearmon = GetLastYearMon(yearmon);
+            }
+
+            return yearmon;
+        }
+
+        /// <summary>
+        /// 指定された年月の 前月のYEARMON を取得する
+        /// </summary>
+        /// <param name="yearmon">yyyyMM</param>
+        /// <returns>yyyyMM</returns>
+        private string GetLastYearMon(string yearmon)
+        {
+            string lastyearmon = DateTime.Now.ToString("yyyyMM"); //とりあえず当月
+            if (!string.IsNullOrEmpty(yearmon))
+            {
+                lastyearmon = yearmon;
+            }
+            //yyyyMM を DateTime に変換
+            DateTime dt = DateTime.ParseExact(lastyearmon, "yyyyMM", System.Globalization.DateTimeFormatInfo.InvariantInfo);
+            DateTime lastDt = dt.AddMonths(-1); //前月
+
+            return lastDt.ToString("yyyyMM");
+        }
+
+        /// <summary>
+        /// 指定された年月が G_PSTN_HSP_MST,G_ACT_EMP_PSTN_MST に存在するか
+        /// </summary>
+        /// <param name="yearmon">yyyyMM</param>
+        /// <returns></returns>
+        private bool ExistsYearMon(string yearmon)
+        {
+            #region SQL
+
+            //G_PSTN_HSP_MST
+            var sql1 = PetaPoco.Sql.Builder.Append(@"
+select
+    yearmon
+from
+    g_pstn_hsp_mst
+where
+    yearmon = @yearmon and
+    rownum = 1
+", new { yearmon = yearmon });
+
+            //G_ACT_EMP_PSTN_MST
+            var sql2 = PetaPoco.Sql.Builder.Append(@"
+select
+    yearmon
+from
+    g_act_emp_pstn_mst
+where
+    yearmon = @yearmon and
+    rownum = 1
+", new { yearmon = yearmon });
+
+            #endregion SQL
+
+            //G_PSTN_HSP_MST
+            var o1 = db.Fetch<YearMonData>(sql1);
+
+            //G_ACT_EMP_PSTN_MST
+            var o2 = db.Fetch<YearMonData>(sql2);
+
+            bool ret = o1.Count > 0 && o2.Count > 0;
+            log.DebugFormat("  -- ExistsYearMon: YEARMON={0}, EXISTS={1}", yearmon, ret);
+
+            return ret;
+        }
+
+        /// <summary>
+        /// DSMに送付するデータを生成する
+        /// (支払い実績データが 医師:施設=1:1 のもの)
+        /// </summary>
+        /// <returns>Dictionary[key=GK_KB+POSITION_CD,value=List]</returns>
+        private Dictionary<string, List<OutputData>> GetSendDataForDsm(string yearmon)
+        {
+            #region SQL
+
+            //DWHの施設-役割紐付けデータから役割コードを取得する
+            var sql = PetaPoco.Sql.Builder.Append(@"
+select
+    T1.dr_name,
+    T1.acnt_nm,
+    T1.ncc_dept,
+    T1.category,
+    T1.siharai,
+    T1.goukei,
+    T1.gk_kb,
+    T1.position_cd,
+    AE.EMP_NM,
+    AE.GKKB_NM,
+    AE.RS_NM,
+    AE.DS_NM
+from
+    (
+        select distinct
+            CR.*,
+            PH.gk_kb,
+            PH.position_cd
+        from
+            c_result CR
+            left join g_pstn_hsp_mst PH
+                on CR.ncc_cd = PH.ncc_cd
+        where
+            PH.yearmon = @yearmon and
+            CR.ncc_count = 1
+    ) T1
+    left join g_act_emp_pstn_mst AE
+        on AE.gk_kb = T1.gk_kb and
+            AE.local_position_cd = T1.position_cd
+where
+    AE.yearmon = @yearmon
+order by
+    T1.dr_code,
+    T1.ncc_cd,
+    T1.gk_kb,
+    T1.position_cd
+", new { yearmon = yearmon });
+
+            #endregion SQL
+
+            //key=GK_KB + POSITION_CD
+            //value=List<OutputData>
+            var rd = new Dictionary<string, List<OutputData>>();
+
+            List<OutputData> os = db.Fetch<OutputData>(sql);
+            foreach (OutputData od in os)
+            {
+                //<治療領域>_<支店名>_<課名>
+                string key = string.Format("{0}_{1}_{2}", od.gk_kb, od.rs_nm, od.ds_nm);
+
+                if (!rd.ContainsKey(key))
+                {
+                    rd.Add(key, new List<OutputData>());
+                }
+                rd[key].Add(od);
+            }
+
+            return rd;
+        }
+
+        /// <summary>
+        /// MRに送付するデータを生成する
+        /// (支払い実績データが 医師:施設=1:N のもの)
+        /// </summary>
+        /// <returns>Dictionary[key=GK_KB+POSITION_CD,value=List]</returns>
+        private Dictionary<string, List<OutputData>> GetSendDataForMr(string yearmon)
+        {
+            #region SQL
+            //DWHの施設-役割紐付けデータから役割コードを取得する
+            var sql = PetaPoco.Sql.Builder.Append(@"
+select
+    T1.dr_name,
+    T1.acnt_nm,
+    T1.ncc_dept,
+    T1.category,
+    T1.siharai,
+    T1.goukei,
+    T1.gk_kb,
+    T1.position_cd,
+    AE.EMP_NM,
+    AE.GKKB_NM,
+    AE.RS_NM,
+    AE.DS_NM
+from
+    (
+        select distinct
+            CR.*,
+            PH.gk_kb,
+            PH.position_cd
+        from
+            c_result CR
+            left join g_pstn_hsp_mst PH
+                on CR.ncc_cd = PH.ncc_cd
+        where
+            PH.yearmon = @yearmon and
+            CR.ncc_count > 1
+    ) T1
+    left join g_act_emp_pstn_mst AE
+        on AE.gk_kb = T1.gk_kb and
+            AE.local_position_cd = T1.position_cd
+where
+    AE.yearmon = @yearmon
+order by
+    T1.dr_code,
+    T1.ncc_cd,
+    T1.gk_kb,
+    T1.position_cd
+", new { yearmon = yearmon });
+
+            #endregion SQL
+            
+            //key=GK_KB + POSITION_CD
+            //value=List<OutputData>
+            var rd = new Dictionary<string, List<OutputData>>();
+
+            List<OutputData> os = db.Fetch<OutputData>(sql);
+            foreach (OutputData od in os)
+            {
+                string key = od.gk_kb + "_" + od.position_cd;
+
+                if (!rd.ContainsKey(key))
+                {
+                    rd.Add(key, new List<OutputData>());
+                }
+                rd[key].Add(od);
+            }
+
+            return rd;
+        }
+
+        #endregion DWH 施設-役割 紐付け反映
+
+        #region Excel出力
+
+        /// <summary>
+        /// Excelファイル出力処理
+        /// </summary>
+        /// <returns></returns>
+        public string OutputExcelFiles()
+        {
+            //年月
+            string yearmon = GetYearMon();
+            //templateファイル
+            string template_file = GetTemplateFile();
+            if (string.IsNullOrEmpty(template_file))
             {
                 return string.Empty;
             }
-            else
+            //出力フォルダ
+            string output_folder = CreateOutputFolder();
+            if (!Directory.Exists(output_folder))
             {
-                return value.ToString();
+                return string.Empty;
             }
+
+            log.DebugFormat("  -- OutputExcelFiles: yearmon={0}, template_file={1}, output_folder={2}",
+                yearmon, template_file, output_folder);
+
+            //DSM向けファイル出力
+            int dsm_count = OutputFileForDsm(yearmon, template_file, output_folder);
+
+            //MR向けファイル出力
+            int mr_count = OutputFileForMr(yearmon, template_file, output_folder);
+
+            //完了メッセージ
+            //TODO 出力フォルダを共有フォルダパスに変換する
+            string message = string.Format(@"
+データ作成が完了しました。
+
+出力フォルダ: {0}
+    DSM向け:     {1} 件
+    MR向け:      {2} 件
+", output_folder, dsm_count, mr_count);
+
+            return message;
         }
 
         /// <summary>
-        /// セルの値をint型に変換する
+        /// DSM向けファイル出力
         /// </summary>
-        /// <param name="value">Worksheet.Cells.Value</param>
-        /// <returns>int</returns>
-        public int ToInt(Object value)
+        /// <param name="yearmon"></param>
+        /// <param name="template_file"></param>
+        /// <param name="output_dir"></param>
+        /// <returns></returns>
+        private int OutputFileForDsm(string yearmon, string template_file, string output_dir)
         {
-            if (value == null)
+            //DSM送付データの取得
+            var data = GetSendDataForDsm(yearmon);
+            int file_count = 0;
+            foreach (var code in data.Keys)
             {
-                return 0;
+                //ファイル名: <治療領域>-<支店>-<課名>.xlsx
+                var head_data = data[code][0]; //先頭行取得
+                string file_name = output_dir + @"\" + string.Format("{0}-{1}-{2}.xlsx",
+                    head_data.gkkb_nm, head_data.rs_nm, head_data.ds_nm).Replace(" ", "_");
+
+                log.DebugFormat("  -- OutputFileForDsm: file_name={0}", file_name);
+
+                //ファイルコピー (上書き)
+                File.Copy(template_file, file_name, true);
+
+                //ファイル書き込み
+                WriteExcel(file_name, data[code]);
+                
+                file_count++;
             }
-            else
-            {
-                try
-                {
-                    var ret = int.Parse(value.ToString());
-                    return ret;
-                }
-                catch (Exception exp)
-                {
-                    log.Debug(string.Format("変換エラー: value= {0}", value), exp);
-                    return 0;
-                }
-            }
+
+            return file_count;
         }
 
         /// <summary>
-        /// セルの値をlong型に変換する
+        /// MR向けファイル出力
         /// </summary>
-        /// <param name="value">Worksheet.Cells.Value</param>
-        /// <returns>long</returns>
-        public long ToLong(Object value)
+        /// <param name="yearmon"></param>
+        /// <param name="template_file"></param>
+        /// <param name="output_dir"></param>
+        /// <returns></returns>
+        private int OutputFileForMr(string yearmon, string template_file, string output_dir)
         {
-            if (value == null)
+            //MR送付データの取得
+            var data = GetSendDataForMr(yearmon);
+            int file_count = 0;
+            foreach (var code in data.Keys)
             {
-                return 0;
+                //ファイル名: <治療領域>-<支店>-<課名>-<MR名>.xlsx
+                var head_data = data[code][0]; //先頭行取得
+                string file_name = output_dir + @"\" + string.Format("{0}-{1}-{2}-{3}.xlsx",
+                    head_data.gkkb_nm, head_data.rs_nm, head_data.ds_nm, head_data.emp_nm).Replace(" ", "_");
+
+                log.DebugFormat("  -- OutputFileForMr: file_name={0}", file_name);
+
+                //ファイルコピー (上書き)
+                File.Copy(template_file, file_name, true);
+
+                //ファイル書き込み
+                WriteExcel(file_name, data[code]);
+
+                file_count++;
             }
-            else
+
+            return file_count;
+        }
+
+
+        /// <summary>
+        /// app.configからtemplateファイルのパスを取得する
+        /// </summary>
+        /// <returns></returns>
+        private string GetTemplateFile()
+        {
+            //template file取得
+            string template_file = ConfigurationManager.AppSettings["excel_template"];
+            if (string.IsNullOrEmpty(template_file))
             {
-                try
+                log.Error("Excel出力用テンプレートファイルを指定してください。");
+                return string.Empty;
+            }
+            if (!File.Exists(template_file))
+            {
+                log.ErrorFormat("Excel出力用テンプレートファイルが存在しません。 template_file=\"{0}\"", template_file);
+                return string.Empty;
+            }
+            return template_file;
+        }
+
+        /// <summary>
+        /// 出力フォルダ作成
+        /// </summary>
+        /// <returns></returns>
+        private string CreateOutputFolder()
+        {
+            string _of = ConfigurationManager.AppSettings["output_folder"];
+            if (string.IsNullOrEmpty(_of))
+            {
+                //実行ファイルのあるフォルダ
+                _of = Path.GetDirectoryName(
+                    System.Reflection.Assembly.GetExecutingAssembly().Location);
+            }
+
+            string tm = DateTime.Now.ToString("yyyyMMddHHmmss");
+            _of += @"\" + tm;
+
+            //フォルダ作成
+            if (!Directory.Exists(_of))
+            {
+                Directory.CreateDirectory(_of);
+                log.DebugFormat("  -- create directory={0}", _of);
+            }
+
+            return _of;
+        }
+
+        /// <summary>
+        /// Excelファイル書き込み処理
+        /// </summary>
+        /// <param name="path">出力ファイル</param>
+        /// <param name="data">出力データ</param>
+        private void WriteExcel(string path, List<OutputData> data)
+        {
+            //シート名
+            string sheetName = ConfigurationManager.AppSettings["output_sheet"];
+            if (string.IsNullOrEmpty(sheetName))
+            {
+                sheetName = @"Sheet1";
+            }
+
+            try
+            {
+                //FileStream fs = new FileStream(path, FileMode.Open)
+                FileInfo fs = new FileInfo(path);
+                
+                using (ExcelPackage xls = new ExcelPackage(fs))
                 {
-                    var ret = long.Parse(value.ToString());
-                    return ret;
+                    //xls.Load(fs);
+                    ExcelWorksheet sheet = xls.Workbook.Worksheets[sheetName];
+
+                    //書き込み
+                    int rowIndex = 2;
+                    foreach (OutputData d in data)
+                    {
+                        sheet.Cells[rowIndex, 1].Value = d.dr_name;     //医師氏名
+                        sheet.Cells[rowIndex, 2].Value = d.acnt_nm;    //施設名
+                        sheet.Cells[rowIndex, 3].Value = d.ncc_dept;    //科名
+                        sheet.Cells[rowIndex, 4].Value = d.category;    //カテゴリー
+                        sheet.Cells[rowIndex, 5].Value = d.siharai;     //支払い回数
+                        sheet.Cells[rowIndex, 6].Value = d.goukei;      //合計金額
+
+                        rowIndex++;
+                    }
+                    xls.Save();
+
                 }
-                catch (Exception exp)
-                {
-                    log.Debug(string.Format("変換エラー: value= {0}", value), exp);
-                    return 0;
-                }
+                
+                log.DebugFormat("  -- WriteExcel={0}, rows={1}", path, data.Count);
+            }
+            catch (Exception exp)
+            {
+                log.Error("  -- WriteExcel", exp);
             }
         }
-        #endregion
+
+        #endregion Excel出力
     }
 }
