@@ -11,7 +11,9 @@ namespace LoadExcel.Models
     class OutputData
     {
         public string dr_name { get; set; }
+        public string dr_ktkn_nm { get; set; }
         public string acnt_nm { get; set; }
+        public string acnt_ktkn_nm { get; set; }
         public string ncc_dept { get; set; }
         public string category { get; set; }
         public int siharai { get; set; }

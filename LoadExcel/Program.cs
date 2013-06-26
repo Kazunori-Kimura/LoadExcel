@@ -26,9 +26,7 @@ namespace LoadExcel
 
             var job = new JobExecute();
 
-            bool isDebug = false; //ファイル読み込みをスキップする(デバッグ時 時間短縮のため)
-
-            if (!isDebug)
+            if (!IsSkipImport())
             {
                 //(1) ファイル読み込み
                 if (!job.LoadExcelFile(path))
@@ -52,7 +50,18 @@ namespace LoadExcel
         }
 
         /// <summary>
+        /// skip_import設定時、ファイル取込みを無視する
+        /// (デバッグ用)
+        /// </summary>
+        /// <returns></returns>
+        private static bool IsSkipImport()
+        {
+            return Utils.ParseBool(ConfigurationManager.AppSettings["skip_import"]);
+        }
+
+        /// <summary>
         /// ignore_warn設定時、警告を無視する
+        /// (デバッグ用)
         /// </summary>
         /// <returns></returns>
         private static bool IsIgnoreWarning()

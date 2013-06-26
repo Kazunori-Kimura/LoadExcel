@@ -406,6 +406,7 @@ order by
             #endregion
 
             #region - 一時テーブル登録
+            //TODO 実績ゼロのデータを除く
             //一時テーブル登録
             var sql = PetaPoco.Sql.Builder.Append(@"
 insert into tmp_data1
@@ -533,8 +534,10 @@ insert into c_result
 select distinct
     t1.dr_code,
     t1.dr_name,
+    t1.dm_ktkn_nm,
     t1.hm_ncc_cd,
     t1.hm_acnt_nm,
+    t1.hm_acnt_ktkn_nm,
     (select
         max(ncc_dept)
     from
@@ -558,8 +561,10 @@ from
             then dm_name
             else drname
         end as dr_name,
+        dm_ktkn_nm,
         hm_ncc_cd,
-        hm_acnt_nm
+        hm_acnt_nm,
+        hm_acnt_ktkn_nm
     from
         TMP_DATA1
     where
@@ -699,7 +704,9 @@ where
             var sql = PetaPoco.Sql.Builder.Append(@"
 select
     T1.dr_name,
+    T1.dr_ktkn_nm,
     T1.acnt_nm,
+    T1.acnt_ktkn_nm,
     T1.ncc_dept,
     T1.category,
     T1.siharai,
@@ -770,7 +777,9 @@ order by
             var sql = PetaPoco.Sql.Builder.Append(@"
 select
     T1.dr_name,
+    T1.dr_ktkn_nm,
     T1.acnt_nm,
+    T1.acnt_ktkn_nm,
     T1.ncc_dept,
     T1.category,
     T1.siharai,
@@ -941,7 +950,6 @@ order by
             return file_count;
         }
 
-
         /// <summary>
         /// app.configからtemplateファイルのパスを取得する
         /// </summary>
@@ -1018,12 +1026,14 @@ order by
                     int rowIndex = 2;
                     foreach (OutputData d in data)
                     {
-                        sheet.Cells[rowIndex, 1].Value = d.dr_name;     //医師氏名
-                        sheet.Cells[rowIndex, 2].Value = d.acnt_nm;    //施設名
-                        sheet.Cells[rowIndex, 3].Value = d.ncc_dept;    //科名
-                        sheet.Cells[rowIndex, 4].Value = d.category;    //カテゴリー
-                        sheet.Cells[rowIndex, 5].Value = d.siharai;     //支払い回数
-                        sheet.Cells[rowIndex, 6].Value = d.goukei;      //合計金額
+                        sheet.Cells[rowIndex, 1].Value = d.dr_name;         //医師氏名
+                        sheet.Cells[rowIndex, 2].Value = d.dr_ktkn_nm;      //医師氏名カナ
+                        sheet.Cells[rowIndex, 3].Value = d.acnt_nm;         //施設名
+                        sheet.Cells[rowIndex, 4].Value = d.acnt_ktkn_nm;    //施設名カナ
+                        sheet.Cells[rowIndex, 5].Value = d.ncc_dept;        //科名
+                        sheet.Cells[rowIndex, 6].Value = d.category;        //カテゴリー
+                        sheet.Cells[rowIndex, 7].Value = d.siharai;         //支払い回数
+                        sheet.Cells[rowIndex, 8].Value = d.goukei;          //合計金額
 
                         rowIndex++;
                     }
